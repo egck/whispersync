@@ -1,0 +1,3 @@
+api_endpoint: :8080
+secret: ""
+data_storage_path: "/Users/etiennegalecki/Documents/repositories/whispersync/ignored/backup"
