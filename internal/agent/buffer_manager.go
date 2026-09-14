@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -33,6 +34,7 @@ func NewBufferManager(flushPeriod int, AppContext *types.AppContext, requestMana
 func (bufferManager *BufferManager) Run() {
 	fmt.Println("starting buffer manager")
 	ticker := time.NewTicker(time.Duration(bufferManager.FlushPeriod) * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-bufferManager.AppContext.Context.Done():
@@ -61,11 +63,25 @@ func (bufferManager *BufferManager) Flush() {
 			events = append(events, event)
 		}
 	}
-	defer bufferManager.lock.Unlock()
+	bufferManager.lock.Unlock()
 
 	// Process events
 	for _, event := range events {
-		bufferManager.requestManager.Sync(event.Name)
+		err := bufferManager.requestManager.Sync(event.Name)
+		if err != nil {
+
+			// push back event in the buffer manager if no new write has been detected during the sync
+			bufferManager.lock.Lock()
+			_, exists := bufferManager.SingleBuffers[event.Name]
+			if !exists {
+				bufferManager.SingleBuffers[event.Name] = &SingleBuffer{event: event}
+			} else if bufferManager.SingleBuffers[event.Name].event == nil {
+				bufferManager.SingleBuffers[event.Name].event = event
+			}
+			bufferManager.lock.Unlock()
+
+			log.Printf("unable to sync file %s, retry in %d secs: %v", event.Name, bufferManager.FlushPeriod, err)
+		}
 	}
 }
 

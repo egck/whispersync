@@ -46,21 +46,37 @@ func NewWatcher(AppContext *types.AppContext, directoryPath string, bufferManage
 	}, nil
 }
 
-// TODO: Rework
 func (watcher *WSWatcher) Run() {
 	fmt.Println("starting watcher")
-	defer watcher.Close()
+	defer func(){
+		if err := watcher.Close(); err != nil {
+			log.Printf("unable to close filesystem watcher: %v", err)
+		}
+	}()
 
 	for {
 		select {
 		case <-watcher.AppContext.Context.Done():
 			fmt.Println("watcher stopped properly")
 			return
-		case event := <-watcher.Events:
-			// Process event
-			watcher.ProcessEvent(&event)
+		case event, open := <-watcher.Events:
+			if !open {
+				log.Println("watcher events channel closed")
+				return
+			}
 
-		case err := <-watcher.Errors:
+			// Process event
+			err := watcher.ProcessEvent(&event)
+			if err != nil {
+				log.Printf("error while processing event: %v\n", err)
+			}
+
+		case err, open := <-watcher.Errors:
+			if !open {
+				log.Println("watcher errors channel closed")
+				return
+			}
+
 			log.Println("watcher error:", err)
 		}
 	}
@@ -80,9 +96,9 @@ func (watcher *WSWatcher) ignoreEvent(event *fsnotify.Event) bool {
 	return false
 }
 
-func (watcher *WSWatcher) ProcessEvent(event *fsnotify.Event) {
+func (watcher *WSWatcher) ProcessEvent(event *fsnotify.Event) error {
 	if watcher.ignoreEvent(event) {
-		return
+		return nil
 	}
 
 	switch {
@@ -91,10 +107,13 @@ func (watcher *WSWatcher) ProcessEvent(event *fsnotify.Event) {
 
 		// Extract file info
 		info, err := os.Stat(event.Name)
-		if err == nil {
-
+		if err != nil {
+			return fmt.Errorf("unable to get file info for %s: %w", event.Name, err)
+		} else {
 			if info.IsDir() { // If new item is a directory, track it
-				watcher.Add(event.Name)
+				if err := watcher.Add(event.Name); err != nil {
+					return fmt.Errorf("unable to watch directory %s: %w", event.Name, err)
+				}
 
 			} else { // Send event in queue
 				watcher.bufferManager.Write(event)
@@ -105,8 +124,10 @@ func (watcher *WSWatcher) ProcessEvent(event *fsnotify.Event) {
 	case event.Op&fsnotify.Write == fsnotify.Write:
 		watcher.bufferManager.Write(event)
 
-	// TODO: Whate about file renaming
+	// TODO: What about file renaming
 	case event.Op&fsnotify.Rename == fsnotify.Rename:
 		break
 	}
+
+	return nil
 }

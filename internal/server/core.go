@@ -118,52 +118,62 @@ func (core *Core) SyncRename(syncRequest *types.SyncRequest) error {
 
 func (core *Core) writeAndBackupVersion(backupFilePath string, versionsPath string, fileName string, fileContent []byte) error {
 	// Check if file already exists
-	currentFile, err := os.OpenFile(backupFilePath+"/"+fileName, os.O_RDWR, 0755)
+	filePath := backupFilePath + "/" + fileName
+	currentFile, err := os.OpenFile(filePath, os.O_RDWR, 0755)
 
 	// Create new file if no anterior version exists or open existing file
 	if err != nil {
 		if os.IsNotExist(err) {
-			if err := os.WriteFile(backupFilePath+"/"+fileName, fileContent, 0755); err != nil {
-				return err
+			if err := os.WriteFile(filePath, fileContent, 0755); err != nil {
+				return fmt.Errorf("unable to create file %s: %w", backupFilePath, err)
 			}
 			return nil
 		}
-		return err
+		return fmt.Errorf("unable to open file %s: %w", backupFilePath, err)
 	}
-	defer currentFile.Close()
+	defer func() {
+		err := currentFile.Close()
+		if err != nil {
+			log.Printf("unable to close file %s: %v", filePath, err)
+		}
+	}()
 
 	// Create a timestamped version of current file
 	now := time.Now().Unix()
 	nowStr := strconv.FormatInt(now, 10)
-	versionnedFile, err := os.Create(versionsPath + "/" + fileName + "." + nowStr)
+	versionedPath := versionsPath + "/" + fileName + "." + nowStr
+	versionedFile, err := os.Create(versionedPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to create file %s: %w", versionedPath, err)
 	}
-	defer versionnedFile.Close()
-	_, err = io.Copy(versionnedFile, currentFile)
+	defer func() {
+		err := versionedFile.Close()
+		if err != nil {
+			log.Printf("unable to close file %s: %v", versionedPath, err)
+		}
+	}()
+	_, err = io.Copy(versionedFile, currentFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to copy %s content in %s: %w", filePath, versionedPath, err)
 	}
 
 	// Update current file
 	if err = currentFile.Truncate(0); err != nil {
-		fmt.Println("unable to truncate current file")
-		return err
+		return fmt.Errorf("unable to truncate file %s: %w", filePath, err)
 	}
 	if _, err = currentFile.Seek(0, 0); err != nil {
-		fmt.Println("unable to reset file index")
-		return err
+		return fmt.Errorf("unable to reset %s file index: %w", filePath, err)
 	}
 	if _, err = currentFile.Write(fileContent); err != nil {
-		fmt.Println("unable to save new content")
+		return fmt.Errorf("unable to save file %s: %w", filePath, err)
 	}
 
 	// Flush files content to disk
 	if err = currentFile.Sync(); err != nil {
-		return err
+		return fmt.Errorf("unable to flush %s on disk: %w", filePath, err)
 	}
-	if err = versionnedFile.Sync(); err != nil {
-		return err
+	if err = versionedFile.Sync(); err != nil {
+		return fmt.Errorf("unable to flush %s on disk: %w", versionedPath, err)
 	}
 
 	return nil

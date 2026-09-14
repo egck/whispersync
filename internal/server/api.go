@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/egck/whispersync/internal/types"
 	"github.com/gin-gonic/gin"
@@ -23,8 +24,12 @@ func NewAPI(core *Core) *API {
 
 	// Init http server
 	httpServer := &http.Server{
-		Addr:    core.AppConfig.APIEndpoint,
-		Handler: router,
+		Addr:              core.AppConfig.APIEndpoint,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Create API
@@ -48,7 +53,7 @@ func (api *API) Stop() {
 func registerRoutes(router *gin.Engine, core *Core) {
 	// get status
 	router.GET("/api/", func(context *gin.Context) {
-		context.JSON(200, gin.H{
+		context.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 		})
 	})
@@ -58,18 +63,18 @@ func registerRoutes(router *gin.Engine, core *Core) {
 		// Extract json from post request
 		var postParams types.FileSyncRequest
 		if err := context.ShouldBindJSON(&postParams); err != nil {
-			context.JSON(400, gin.H{"message": "bad params"})
+			context.JSON(http.StatusBadRequest, gin.H{"message": "bad params"})
 			return
 		}
 
 		// Try to sync file
 		err := core.SyncFile(&postParams)
 		if err != nil {
-			context.JSON(409, gin.H{"message": err})
+			context.JSON(http.StatusConflict, gin.H{"message": err})
 			return
 		}
 
-		context.JSON(200, gin.H{"message": "sync file ok"})
+		context.JSON(http.StatusOK, gin.H{"message": "sync file ok"})
 	})
 
 	// sync rename
@@ -77,17 +82,17 @@ func registerRoutes(router *gin.Engine, core *Core) {
 		// extract json from sync request
 		var postParams types.SyncRequest
 		if err := context.ShouldBindJSON(&postParams); err != nil {
-			context.JSON(400, gin.H{"message": err})
+			context.JSON(http.StatusBadRequest, gin.H{"message": err})
 			return
 		}
 
 		// Try to sync rename of the file / directory
 		err := core.SyncRename(&postParams)
 		if err != nil {
-			context.JSON(409, gin.H{"message": err})
+			context.JSON(http.StatusConflict, gin.H{"message": err})
 			return
 		}
 
-		context.JSON(200, gin.H{"message": "sync rename ok"})
+		context.JSON(http.StatusOK, gin.H{"message": "sync rename ok"})
 	})
 }
